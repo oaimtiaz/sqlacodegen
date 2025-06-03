@@ -93,6 +93,11 @@ def main() -> None:
         ),
     )
     parser.add_argument("--outfile", help="file to write output to (default: stdout)")
+    parser.add_argument(
+        "--standalone-enums",
+        action="store_true",
+        help="render every Enum as a standalone variable and reuse it in columns",
+    )
     args = parser.parse_args()
 
     if args.version:

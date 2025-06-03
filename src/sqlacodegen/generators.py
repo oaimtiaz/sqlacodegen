@@ -118,7 +118,12 @@ class CodeGenerator(metaclass=ABCMeta):
 
 @dataclass(eq=False)
 class TablesGenerator(CodeGenerator):
-    valid_options: ClassVar[set[str]] = {"noindexes", "noconstraints", "nocomments"}
+    valid_options: ClassVar[set[str]] = {
+        "noindexes",
+        "noconstraints",
+        "nocomments",
+        "standalone_enums",
+    }
     builtin_module_names: ClassVar[set[str]] = set(sys.builtin_module_names) | {
         "dataclasses"
     }
@@ -135,10 +140,42 @@ class TablesGenerator(CodeGenerator):
         self.indentation: str = indentation
         self.imports: dict[str, set[str]] = defaultdict(set)
         self.module_imports: set[str] = set()
+        self.standalone_enums: bool = "standalone_enums" in options
+        self._enum_registry: dict[tuple, str] = {}
 
     @property
     def views_supported(self) -> bool:
         return True
+
+    def _collect_enum_defs(self) -> None:
+        for table in self.metadata.tables.values():
+            for col in table.columns:
+                if not isinstance(col.type, Enum):
+                    continue
+
+                key = (tuple(col.type.enums), col.type.name, col.type.schema)
+                if key in self._enum_registry:
+                    continue  # already registered
+
+                base = (col.type.name or f"{col.name}_enum").lower()
+                var = self.find_free_name(
+                    f"{base}_enum",  # reuse existing helper
+                    global_names=set(self._enum_registry.values()),
+                )
+                self._enum_registry[key] = var
+
+    def _render_enum_block(self) -> str:
+        lines: list[str] = []
+        for (values, name, schema), var in self._enum_registry.items():
+            args = ", ".join(repr(v) for v in values)
+            kw = []
+            if name:
+                kw.append(f"name={name!r}")
+            if schema:
+                kw.append(f"schema={schema!r}")
+            kw_part = (", " + ", ".join(kw)) if kw else ""
+            lines.append(f"{var} = Enum({args}{kw_part})")
+        return "\n".join(lines)
 
     def generate_base(self) -> None:
         self.base = Base(
@@ -149,6 +186,9 @@ class TablesGenerator(CodeGenerator):
 
     def generate(self) -> str:
         self.generate_base()
+
+        if self.standalone_enums:
+            self._collect_enum_defs()
 
         sections: list[str] = []
 
@@ -194,6 +234,10 @@ class TablesGenerator(CodeGenerator):
         imports = "\n\n".join("\n".join(line for line in group) for group in groups)
         if imports:
             sections.insert(0, imports)
+
+        if self.standalone_enums and self._enum_registry:
+            sections.insert(0, self._render_enum_block() + "\n")
+            self.add_literal_import("sqlalchemy", "Enum")  # make sure it’s imported
 
         return "\n\n".join(sections) + "\n"
 
@@ -498,6 +542,9 @@ class TablesGenerator(CodeGenerator):
             return render_callable("mapped_column", *args, kwargs=kwargs)
 
     def render_column_type(self, coltype: object) -> str:
+        if self.standalone_enums and isinstance(coltype, Enum):
+            key = (tuple(coltype.enums), coltype.name, coltype.schema)
+            return self._enum_registry[key]  #
         args = []
         kwargs: dict[str, Any] = {}
         sig = inspect.signature(coltype.__class__.__init__)
