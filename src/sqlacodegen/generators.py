@@ -229,15 +229,15 @@ class TablesGenerator(CodeGenerator):
         if rendered_models:
             sections.append(rendered_models)
 
+        if self.standalone_enums and self._enum_registry:
+            sections.insert(0, self._render_enum_block() + "\n")
+            self.add_literal_import("sqlalchemy", "Enum")  # make sure it’s imported
+
         # Render collected imports
         groups = self.group_imports()
         imports = "\n\n".join("\n".join(line for line in group) for group in groups)
         if imports:
             sections.insert(0, imports)
-
-        if self.standalone_enums and self._enum_registry:
-            sections.insert(0, self._render_enum_block() + "\n")
-            self.add_literal_import("sqlalchemy", "Enum")  # make sure it’s imported
 
         return "\n\n".join(sections) + "\n"
 

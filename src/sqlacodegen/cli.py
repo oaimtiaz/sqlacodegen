@@ -126,6 +126,9 @@ def main() -> None:
     schemas = args.schemas.split(",") if args.schemas else [None]
     options = set(args.options.split(",")) if args.options else set()
 
+    if args.standalone_enums:
+        options.add("standalone_enums")
+
     # Instantiate the generator
     generator_class = generators[args.generator].load()
     generator = generator_class(metadata, engine, options)
